@@ -1,0 +1,37 @@
+NXP Software Content Register
+
+Package:                     tflite-neutron-delegate.git
+Outgoing License:            Apache-2.0 
+License File:                LICENSE.txt
+Type of Content:             source
+Description and comments:    TensorFlow Lite Delegate for imx neutron NPU.
+Release Location:            https://github.com/nxp-imx/tflite-neutron-delegate
+Origin:                      NXP (Apache-2.0)
+
+--------------------------------------------
+
+Build Dependencies:
+
+--------------------------------------------
+
+Package:                   Neutron Driver Library
+Outgoing License:          LA_OPT_NXP_Software_License v42 January 2023 - Standard use - Section 2.2 applies
+License Files:             LA_OPT_NXP_Software_License.pdf
+Type of content:           Binary(Linux library)
+Description and comments:  User space library for linux kernel driver of Neutron
+Release Location:          eIQ Website (https://www.nxp.com/design/software/development-software/eiq-ml-development-environment:EIQ)
+Origin:                    NXP (proprietary)
+
+--------------------------------------------
+
+Package:                   TensorFlow
+Outgoing License:          Apache 2.0
+License Files:             https://github.com/tensorflow/tensorflow/blob/master/LICENSE
+Type of content:           Source Code
+Description and comments:  Machine Learning platform
+Release Location:          https://github.com/tensorflow/tensorflow
+Origin:                    https://github.com/tensorflow/tensorflow
+Files location:            simple_delegate.cc simple_delegate.h
+
+--------------------------------------------
+
