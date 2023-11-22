@@ -22,12 +22,12 @@
 #include <map>
 
 #include "neutron_delegate.h"
-#include "simple_delegate.h"
 
 #include "tensorflow/lite/context_util.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/util.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+#include "tensorflow/lite/delegates/utils/simple_delegate.h"
 
 extern "C" {
 #include "neutron/NeutronDriver.h"

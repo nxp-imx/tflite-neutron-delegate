@@ -37,7 +37,7 @@ set(DELEGATE_SRC_DIR        ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(tensorflow REQUIRED)
 
 list(APPEND NEUTRON_DELEGATE_SRCS
-  ${DELEGATE_SRC_DIR}/simple_delegate.cc
+  ${tensorflow_SOURCE_DIR}/tensorflow/lite/delegates/utils/simple_delegate.cc
   ${DELEGATE_SRC_DIR}/neutron_delegate.cc
   ${DELEGATE_SRC_DIR}/neutron_delegate_adaptor.cc
 )

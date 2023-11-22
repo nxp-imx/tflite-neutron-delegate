@@ -31,7 +31,6 @@ Type of content:           Source Code
 Description and comments:  Machine Learning platform
 Release Location:          https://github.com/tensorflow/tensorflow
 Origin:                    https://github.com/tensorflow/tensorflow
-Files location:            simple_delegate.cc simple_delegate.h
 
 --------------------------------------------
 
