@@ -42,7 +42,8 @@ namespace neutron {
 class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
  public:
   explicit NeutronDelegateKernel(const NeutronDelegateOptions& opt)
-      : options(opt) {}
+      : options(opt), dcfg{nullptr, nullptr, nullptr}, mcfg{nullptr, nullptr},
+	nmh{nullptr}{}
 
   TfLiteStatus Init(TfLiteContext* context,
                     const TfLiteDelegateParams* params) override {
@@ -58,12 +59,14 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 
     // Get address to microcode data.
     auto microcodeIndex = node->inputs->data[node->inputs->size - 2];
+    TF_LITE_ENSURE(context, microcodeIndex < context->tensors_size);
     auto microcodeTensor = &context->tensors[microcodeIndex];
     // Set microcode address in neutron structure
     mcfg.microcode = static_cast<const void *>(microcodeTensor->data.raw);
 
     // Get address to weights data.
     auto weightsIndex = node->inputs->data[node->inputs->size - 1];
+    TF_LITE_ENSURE(context, weightsIndex < context->tensors_size);
     auto weightsTensor = &context->tensors[weightsIndex];
     // Set weights address in neutron structure.
     mcfg.weights = static_cast<const void *>(weightsTensor->data.raw);
