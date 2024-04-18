@@ -83,18 +83,25 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
       dcfg[i].outputs = new void *[node->outputs->size];
 
       // Get address to microcode data.
-      auto microcodeIndex = inputs_[i][inputs_[i].size() - 2];
+      auto microcodeIndex = inputs_[i][inputs_[i].size() - 3];
       TF_LITE_ENSURE(context, microcodeIndex < context->tensors_size);
       auto microcodeTensor = &context->tensors[microcodeIndex];
       // Set microcode address in neutron structure
       mcfg[i].microcode = static_cast<const void *>(microcodeTensor->data.raw);
 
       // Get address to weights data.
-      auto weightsIndex = inputs_[i][inputs_[i].size() - 1];
+      auto weightsIndex = inputs_[i][inputs_[i].size() - 2];
       TF_LITE_ENSURE(context, weightsIndex < context->tensors_size);
       auto weightsTensor = &context->tensors[weightsIndex];
       // Set weights address in neutron structure.
       mcfg[i].weights = static_cast<const void *>(weightsTensor->data.raw);
+
+      // Get address to kernel data.
+      auto kernelIndex = inputs_[i][inputs_[i].size() - 1];
+      TF_LITE_ENSURE(context, kernelIndex < context->tensors_size);
+      auto kernelTensor = &context->tensors[kernelIndex];
+      // Set kernels address in neutron structure.
+      mcfg[i].kernels = static_cast<const void *>(kernelTensor->data.raw);
 
       // Prepare data for through neutron driver.
       auto neutronRC = neutronModelPrepare(&mcfg[i], &nmh[i]);
