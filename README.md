@@ -1,5 +1,5 @@
 # TfLite-neutron-delegate
-tflite-neutron-delegate is one external delegate for tensorflow lite, it is constructed with neutron-software, it can run neutron converted model on imx Neutron NPU.
+tflite-neutron-delegate is one external delegate for tensorflow lite, it is constructed with neutron-software, it can build tflite models and run on imx Neutron NPU.
 
 # Use tflite-neutron-delegate
 
@@ -41,5 +41,5 @@ If tensorflow source code downloaded by cmake, you can find it in <build_output_
 
 ## Run
 ```sh
-./benchmark_model --external_delegate_path=<patch_to_libneutron_delegate.so> --graph=<tflite_neutron_model.tflite>
+./benchmark_model --external_delegate_path=<patch_to_libneutron_delegate.so> --graph=<tflite_model.tflite>
 ```

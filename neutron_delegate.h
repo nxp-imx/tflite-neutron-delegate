@@ -27,6 +27,8 @@
 #define NEUTRON_CUSTOM_NAME "NeutronGraph"
 
 typedef struct {
+  std::string target;
+  bool is_neutron_model;
 }NeutronDelegateOptions;
 
 // Returns a structure with the default delegate options.

@@ -34,17 +34,23 @@ endif()
 
 set(DELEGATE_SRC_DIR        ${CMAKE_CURRENT_SOURCE_DIR})
 
-find_package(tensorflow REQUIRED)
 
+find_package(tensorflow REQUIRED)
 list(APPEND NEUTRON_DELEGATE_SRCS
   ${tensorflow_SOURCE_DIR}/tensorflow/lite/delegates/utils/simple_delegate.cc
   ${DELEGATE_SRC_DIR}/neutron_delegate.cc
   ${DELEGATE_SRC_DIR}/neutron_delegate_adaptor.cc
+  ${DELEGATE_SRC_DIR}/neutron_delegate_utils.cc
 )
+
+include_directories(${CMAKE_BINARY_DIR}/flatbuffers/include)
+include_directories("${tensorflow_SOURCE_DIR}")
+include_directories("${DELEGATE_SRC_DIR}/include")
+link_directories(${DELEGATE_SRC_DIR})
 
 add_library(neutron_delegate SHARED ${NEUTRON_DELEGATE_SRCS})
 
-list(APPEND NEUTRON_DELEGATE_DEPENDENCIES NeutronDriver)
+list(APPEND NEUTRON_DELEGATE_DEPENDENCIES NeutronConverter NeutronDriver)
 
 target_compile_options(neutron_delegate PUBLIC ${NEUTRON_DELEGATE_OPTIONS})
 target_link_libraries(neutron_delegate PUBLIC ${NEUTRON_DELEGATE_DEPENDENCIES})
