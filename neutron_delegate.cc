@@ -192,7 +192,8 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
         auto indexK = neutron_ops[idx]->inputs[input_size + 2];
         const auto &tensorK = model->subgraphs[0]->tensors[indexK];
         delegate_op.mcfg.kernels = model->buffers[tensorK->buffer]->data.data();
-      } else if (op_code->builtin_code == BuiltinOperator_RESHAPE) {
+      } else if (op_code->builtin_code == BuiltinOperator_RESHAPE ||
+		 op_code->builtin_code == BuiltinOperator_QUANTIZE) {
         //The reshape output shape is set by neutron-convertor
         input_size = 1;
         output_size = 1;
@@ -249,31 +250,45 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 
   TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) override {
     for (auto &delegate_op : operations) {
-      if (delegate_op.builtin_code == BuiltinOperator_CUSTOM) {
-        // Set reference for all inputs
-        for (int index = 0; index < delegate_op.inputs.size(); index ++) {
+      switch (delegate_op.builtin_code) {
+        case BuiltinOperator_CUSTOM: {
+          // Set reference for all inputs
+          for (int index = 0; index < delegate_op.inputs.size(); index ++) {
             auto tensor_index = delegate_op.inputs[index];
             auto input = &context->tensors[tensor_index];
             delegate_op.dcfg.inputs[index] = input->data.raw;
-        }
+          }
 
-        for (int index = 0; index < delegate_op.outputs.size(); index ++) {
+          for (int index = 0; index < delegate_op.outputs.size(); index ++) {
             auto tensor_index = delegate_op.outputs[index];
             auto output = &context->tensors[tensor_index];
             delegate_op.dcfg.outputs[index] = output->data.raw;
-        }
+          }
 
-        // Run neutron compute.
-        auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
-        TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
-      } else if (delegate_op.builtin_code == BuiltinOperator_SLICE){
-        auto input = &context->tensors[delegate_op.inputs[0]];
-        auto output = &context->tensors[delegate_op.outputs[0]];
-        ComputeSlice(input, output, delegate_op.params.slice);
-      } else if (delegate_op.builtin_code == BuiltinOperator_RESHAPE) {
-        auto input = &context->tensors[delegate_op.inputs[0]];
-        auto output = &context->tensors[delegate_op.outputs[0]];
-        ComputeReshape(input, output, delegate_op.params.reshape);
+          // Run neutron compute.
+          auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
+          TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+          break;
+        }
+        case BuiltinOperator_SLICE: {
+          auto input = &context->tensors[delegate_op.inputs[0]];
+          auto output = &context->tensors[delegate_op.outputs[0]];
+          ComputeSlice(input, output, delegate_op.params.slice);
+	  break;
+        }
+        case BuiltinOperator_RESHAPE: {
+          auto input = &context->tensors[delegate_op.inputs[0]];
+          auto output = &context->tensors[delegate_op.outputs[0]];
+          ComputeReshape(input, output, delegate_op.params.reshape);
+	  break;
+        }
+	case BuiltinOperator_QUANTIZE: {
+          auto input = &context->tensors[delegate_op.inputs[0]];
+          auto output = &context->tensors[delegate_op.outputs[0]];
+          ComputeRequantize(input, output);
+        }
+        default:
+          break;
       }
     }
     return kTfLiteOk;

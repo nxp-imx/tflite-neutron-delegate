@@ -24,6 +24,10 @@
 namespace tflite {
 namespace neutron {
 
+typedef std::initializer_list<TfLiteType> TypeList;
+const TypeList supported_dtypes{kTfLiteUInt8, kTfLiteInt8};
+const TypeList supported_bias_dtypes{kTfLiteInt32};
+
 inline std::string CharPtrToStr(const char *in) {
   if (in == nullptr) {
     return std::string("");
@@ -326,6 +330,39 @@ TfLiteStatus ComputeReshape(TfLiteTensor* input,
   return kTfLiteOk;
 }
 
+TfLiteStatus ComputeRequantize(TfLiteTensor* input,
+                               TfLiteTensor* output) {
+  int i = 0;
+  int size = input->bytes;
+
+  if (input->type == kTfLiteUInt8) {
+#ifdef USE_NEON
+    for (; i <= size - 16; i += 16) {
+      const uint8x16_t input_vec = vld1q_u8(input->data.uint8 + i);
+      uint8x16_t tmp = vdupq_n_u8(128);
+      uint8x16_t sub_result = vsubq_u8(input_vec, tmp);
+      vst1q_u8(output->data.uint8 + i, sub_result);
+    }
+#endif
+    for (; i < size; i ++){
+      output->data.int8[i] = input->data.uint8[i] - 128;
+    }
+  } else {
+#ifdef USE_NEON
+    for (; i <= size - 16; i += 16) {
+      const int8x16_t input_vec = vld1q_s8(input->data.int8 + i);
+      int8x16_t tmp = vdupq_n_s8(128);
+      int8x16_t add_result = vaddq_s8(input_vec, tmp);
+      vst1q_s8(output->data.int8 + i, add_result);
+    }
+#endif
+    for (; i < size; i ++){
+      output->data.uint8[i] = input->data.int8[i] + 128;
+    }
+  }
+  return kTfLiteOk;
+}
+
 TfLiteStatus ComputeSlice(TfLiteTensor* input,
                           TfLiteTensor* output,
                           SliceParams op_params) {
@@ -396,6 +433,20 @@ inline void ExpectInputTypeIn(TfLiteContext* context,
                               bool* supported) {
   if (index >= node->inputs->size) {
     *supported = false;
+  } else {
+    const TfLiteType input_type =
+            context->tensors[node->inputs->data[index]].type;
+    ExpectTypeIn(input_type, allowed_types, supported);
+  }
+}
+
+inline void ExpectBiasTypeIn(TfLiteContext* context,
+                             const TfLiteNode* node,
+                             int index,
+                             std::initializer_list<TfLiteType> allowed_types,
+                             bool* supported) {
+  if (index >= node->inputs->size) {
+    *supported = true;
   } else {
     const TfLiteType input_type =
             context->tensors[node->inputs->data[index]].type;
@@ -485,33 +536,33 @@ bool IsNodeSupportedByNeutron(TfLiteContext* context,
   switch (builtin_code){
     case kTfLiteBuiltinAdd: {
       /*
-        -Input tensors must be INT8.
-        -Output tensor must be INT8.
+        -Input tensors must be INT8/UINT8.
+        -Output tensor must be INT8/UINT8.
         -The offset in memory between the two input operands
          must be smaller than 524288 (512k) WORDS.
       */
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectInputTypeIn(context, node, 1, {kTfLiteInt8}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectInputTypeIn(context, node, 1, supported_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       ExpectInputNotConstant(context, node, 0, &supported);
       ExpectInputNotConstant(context, node, 1, &supported);
       break;
     }
     case kTfLiteBuiltinDepthwiseConv2d: {
       /*
-        -Input tensor must be INT8.
-        -Filter tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Filter tensor must be INT8/UINT8.
         -Bias tensor must be INT32.
-        -Output tensor must be INT8.
+        -Output tensor must be INT8/UINT8.
         -Filter tensor must be constant.
         -Bias tensor must be constant.
         -The depth multiplier must be 1.
       */
       auto params = reinterpret_cast<TfLiteDepthwiseConvParams*>(data);
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectInputTypeIn(context, node, 1, {kTfLiteInt8}, &supported);
-      ExpectInputTypeIn(context, node, 2, {kTfLiteInt32}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectInputTypeIn(context, node, 1, supported_dtypes, &supported);
+      ExpectBiasTypeIn(context, node, 2, supported_bias_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       ExpectInputConstant(context, node, 1, &supported);
       ExpectInputConstant(context, node, 2, &supported);
       Expect(params->depth_multiplier == 1, &supported);
@@ -524,19 +575,19 @@ bool IsNodeSupportedByNeutron(TfLiteContext* context,
     }
     case kTfLiteBuiltinAveragePool2d: {
       /*
-        -Input tensor must be INT8.
-        -Output tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Output tensor must be INT8/UINT8.
         -Input batch size must be 1.
         -The number of input channels must be a multiple of NUM_MACS.
       */
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       break;
     }
     case kTfLiteBuiltinMaxPool2d: {
       /*
-        -Input tensor must be INT8.
-        -Output tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Output tensor must be INT8/UINT8.
         -Input and output batch size must be 1.
         -Stride for height/width must be 1 or 2.
         -The number of input and output channels must be a multiple of NUM_MACS.
@@ -544,24 +595,25 @@ bool IsNodeSupportedByNeutron(TfLiteContext* context,
         -The left and right padding must be smaller than the kernel width.
       */
       auto params = reinterpret_cast<TfLitePoolParams*>(data);
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       CheckMaxPool2d(input_shape, output_shape, params, num_macs, &supported);
-      supported = false;
       break;
     }
     case kTfLiteBuiltinConv2d: {
       /*
-        -Input tensor must be INT8.
-        -Filter tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Filter tensor must be INT8/UINT8.
         -Bias tensor must be INT32.
-        -Output tensor must be INT8.
+        -Output tensor must be INT8/UINT8.
         -Filter tensor must be constant.
         -Bias tensor must be constant.
       */
       auto params = reinterpret_cast<TfLiteConvParams*>(data);
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectInputTypeIn(context, node, 1, supported_dtypes, &supported);
+      ExpectBiasTypeIn(context, node, 2, supported_bias_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       ExpectInputConstant(context, node, 1, &supported);
       ExpectInputConstant(context, node, 2, &supported);
       Expect(input_shape.size() == 4 && output_shape.size() == 4, &supported);
@@ -571,37 +623,37 @@ bool IsNodeSupportedByNeutron(TfLiteContext* context,
     }
     case kTfLiteBuiltinFullyConnected: {
       /*
-        -Input tensor must be INT8.
-        -Weights tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Weights tensor must be INT8/UINT8.
         -Bias tensor must be INT32.
-        -Output tensor must be INT8.
+        -Output tensor must be INT8/UINT8.
         -Weights tensor must be constant.
         -Bias tensor must be constant.
       */
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectInputTypeIn(context, node, 1, {kTfLiteInt8}, &supported);
-      ExpectInputTypeIn(context, node, 2, {kTfLiteInt32}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectInputTypeIn(context, node, 1, supported_dtypes, &supported);
+      ExpectBiasTypeIn(context, node, 2, supported_bias_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       ExpectInputConstant(context, node, 1, &supported);
       ExpectInputConstant(context, node, 2, &supported);
       break;
     }
     case kTfLiteBuiltinPad: {
       /*
-        -Input tensor must be INT8.
-        -Weights tensor must be INT8.
+        -Input tensor must be INT8/UINT8.
+        -Weights tensor must be INT8/UINT8.
         -Only channel padding is supported for a NHWC input/output tensor:
            -The number of output channels must be a multiple of NUM_MACS.
            -The difference between the number of input/output tensors
             must be smaller than numMacs + 1.
       */
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
-      ExpectOutputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
+      ExpectOutputTypeIn(context, node, 0, supported_dtypes, &supported);
       CheckPad(input_shape, output_shape, num_macs, &supported);
       break;
     }
     case kTfLiteBuiltinReshape: {
-      ExpectInputTypeIn(context, node, 0, {kTfLiteInt8}, &supported);
+      ExpectInputTypeIn(context, node, 0, supported_dtypes, &supported);
       ExpectInputTypeIn(context, node, 1, {kTfLiteInt32}, &supported);
       ExpectInputConstant(context, node, 1, &supported);
       break;

@@ -35,6 +35,9 @@ TfLiteStatus ComputeReshape(TfLiteTensor* input,
                             TfLiteTensor* output,
                             ReshapeParams op_params);
 
+TfLiteStatus ComputeRequantize(TfLiteTensor* input,
+                               TfLiteTensor* output);
+
 bool IsNodeSupportedByNeutron(TfLiteContext* context,
                               const TfLiteNode* node,
                               int32_t builtin_code);
