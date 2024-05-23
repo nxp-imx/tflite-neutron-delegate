@@ -29,14 +29,22 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
 
 TfLiteStatus ComputeSlice(TfLiteTensor* input,
                           TfLiteTensor* output,
-                          SliceParams op_params);
+                          SliceParams& op_params);
 
 TfLiteStatus ComputeReshape(TfLiteTensor* input,
                             TfLiteTensor* output,
-                            ReshapeParams op_params);
+                            ReshapeParams& op_params);
 
 TfLiteStatus ComputeRequantize(TfLiteTensor* input,
                                TfLiteTensor* output);
+
+TfLiteStatus ComputePad(TfLiteTensor* input,
+                        TfLiteTensor* output,
+			PadParams& op_params);
+
+void* GetNeutronInputData(ModelT *model,
+	                  int op_idx,
+			  int input_idx);
 
 bool IsNodeSupportedByNeutron(TfLiteContext* context,
                               const TfLiteNode* node,

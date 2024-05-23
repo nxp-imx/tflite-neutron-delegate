@@ -154,11 +154,11 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 
         auto index_begin = neutron_ops[idx]->inputs[1];
         const auto &tensor_begin = model->subgraphs[0]->tensors[index_begin];
-        auto begin_data = (int32_t*)model->buffers[tensor_begin->buffer]->data.data();
+        auto begin_data = (int32_t*)GetNeutronInputData(model.get(), idx, 1);
 
         auto index_size = neutron_ops[idx]->inputs[2];
         const auto &tensor_size = model->subgraphs[0]->tensors[index_size];
-        auto size_data = (int32_t*)model->buffers[tensor_size->buffer]->data.data();
+        auto size_data = (int32_t*)GetNeutronInputData(model.get(), idx, 2);
 
         TF_LITE_ENSURE_EQ(context, tensor_begin->type, TensorType_INT32);
         TF_LITE_ENSURE_EQ(context, tensor_size->type, TensorType_INT32);
@@ -178,20 +178,21 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
         input_size = neutron_ops[idx]->inputs.size() - 3;
         output_size = neutron_ops[idx]->outputs.size() - 1;
 
-	// Get address to microcode data.
-        auto indexM = neutron_ops[idx]->inputs[input_size];
-        const auto &tensorM = model->subgraphs[0]->tensors[indexM];
-        delegate_op.mcfg.microcode = model->buffers[tensorM->buffer]->data.data();
+	delegate_op.mcfg.microcode = GetNeutronInputData(model.get(), idx, input_size);
+	delegate_op.mcfg.weights = GetNeutronInputData(model.get(), idx, input_size + 1);
+	delegate_op.mcfg.kernels = GetNeutronInputData(model.get(), idx, input_size + 2);
+      } else if (op_code->builtin_code == BuiltinOperator_PAD) {
+	int32_t* pad_data = (int32_t*)GetNeutronInputData(model.get(), idx, 1);
 
-	// Get address to weights data.
-        auto indexW = neutron_ops[idx]->inputs[input_size + 1];
-        const auto &tensorW = model->subgraphs[0]->tensors[indexW];
-        delegate_op.mcfg.weights = model->buffers[tensorW->buffer]->data.data();
-
-	// Get address to kernels data.
-        auto indexK = neutron_ops[idx]->inputs[input_size + 2];
-        const auto &tensorK = model->subgraphs[0]->tensors[indexK];
-        delegate_op.mcfg.kernels = model->buffers[tensorK->buffer]->data.data();
+        input_size = 1;
+        output_size = 1;
+	delegate_op.params.pad.resizing_category = ResizingCategory::kGenericResize;
+	delegate_op.params.pad.left_padding_count = 4;
+	delegate_op.params.pad.right_padding_count = 4;
+        for (int i = 3; i >= 0; --i) {
+          delegate_op.params.pad.left_padding[idx] = pad_data[i * 2];
+          delegate_op.params.pad.right_padding[idx] = pad_data[i * 2 + 1];
+        }
       } else if (op_code->builtin_code == BuiltinOperator_RESHAPE ||
 		 op_code->builtin_code == BuiltinOperator_QUANTIZE) {
         //The reshape output shape is set by neutron-convertor
@@ -250,19 +251,21 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 
   TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) override {
     for (auto &delegate_op : operations) {
+      auto input = &context->tensors[delegate_op.inputs[0]];
+      auto output = &context->tensors[delegate_op.outputs[0]];
       switch (delegate_op.builtin_code) {
         case BuiltinOperator_CUSTOM: {
           // Set reference for all inputs
           for (int index = 0; index < delegate_op.inputs.size(); index ++) {
             auto tensor_index = delegate_op.inputs[index];
-            auto input = &context->tensors[tensor_index];
-            delegate_op.dcfg.inputs[index] = input->data.raw;
+            auto tensor = &context->tensors[tensor_index];
+            delegate_op.dcfg.inputs[index] = tensor->data.raw;
           }
 
           for (int index = 0; index < delegate_op.outputs.size(); index ++) {
             auto tensor_index = delegate_op.outputs[index];
-            auto output = &context->tensors[tensor_index];
-            delegate_op.dcfg.outputs[index] = output->data.raw;
+            auto tensor = &context->tensors[tensor_index];
+            delegate_op.dcfg.outputs[index] = tensor->data.raw;
           }
 
           // Run neutron compute.
@@ -271,21 +274,20 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
           break;
         }
         case BuiltinOperator_SLICE: {
-          auto input = &context->tensors[delegate_op.inputs[0]];
-          auto output = &context->tensors[delegate_op.outputs[0]];
           ComputeSlice(input, output, delegate_op.params.slice);
 	  break;
         }
         case BuiltinOperator_RESHAPE: {
-          auto input = &context->tensors[delegate_op.inputs[0]];
-          auto output = &context->tensors[delegate_op.outputs[0]];
           ComputeReshape(input, output, delegate_op.params.reshape);
 	  break;
         }
 	case BuiltinOperator_QUANTIZE: {
-          auto input = &context->tensors[delegate_op.inputs[0]];
-          auto output = &context->tensors[delegate_op.outputs[0]];
           ComputeRequantize(input, output);
+	  break;
+        }
+	case BuiltinOperator_PAD: {
+          ComputePad(input, output, delegate_op.params.pad);
+	  break;
         }
         default:
           break;
@@ -319,6 +321,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
     union {
       SliceParams slice;
       ReshapeParams reshape;
+      PadParams pad;
     } params;
     BuiltinOperator builtin_code;
   };
