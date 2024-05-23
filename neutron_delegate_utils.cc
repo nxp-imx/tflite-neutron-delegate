@@ -324,7 +324,7 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
 
 TfLiteStatus ComputeReshape(TfLiteTensor* input,
                             TfLiteTensor* output,
-                            ReshapeParams op_params) {
+                            ReshapeParams& op_params) {
 
   memcpy(output->data.raw, input->data.raw, input->bytes);
   return kTfLiteOk;
@@ -363,9 +363,21 @@ TfLiteStatus ComputeRequantize(TfLiteTensor* input,
   return kTfLiteOk;
 }
 
+TfLiteStatus ComputePad(TfLiteTensor* input,
+                        TfLiteTensor* output,
+			PadParams& op_params) {
+  const int8_t pad_value = static_cast<int8_t>(output->params.zero_point);
+
+  optimized_ops::Pad(op_params, GetTensorShape(input),
+                     GetTensorData<int8_t>(input),
+                     &pad_value, GetTensorShape(output),
+                     GetTensorData<int8_t>(output));
+  return kTfLiteOk;
+}
+
 TfLiteStatus ComputeSlice(TfLiteTensor* input,
                           TfLiteTensor* output,
-                          SliceParams op_params) {
+                          SliceParams& op_params) {
   const int kMaxDim = 5;
 
   // The Slice op implementation only accepts 5-D sizes. That constraint is, for
@@ -409,6 +421,14 @@ TfLiteStatus ComputeSlice(TfLiteTensor* input,
       return kTfLiteError;
   }
   return kTfLiteOk;
+}
+
+void* GetNeutronInputData(ModelT *model, int op_idx, int input_idx) {
+  auto &neutron_op = model->subgraphs[0]->operators[op_idx];
+  auto index = neutron_op->inputs[input_idx];
+  const auto &tensor = model->subgraphs[0]->tensors[index];
+
+  return model->buffers[tensor->buffer]->data.data();
 }
 
 inline void Expect(bool condition, bool* supported){
