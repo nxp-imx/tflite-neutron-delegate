@@ -20,7 +20,6 @@
 #include <string.h>
 #include <vector>
 #include <map>
-#include <fstream>
 #include <iostream>
 
 #include "neutron_delegate_utils.h"
@@ -36,7 +35,6 @@
 extern "C" {
 #include "neutron/NeutronDriver.h"
 }
-#include "neutron/NeutronConverter.h"
 
 using namespace std;
 
@@ -106,17 +104,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
   TfLiteStatus InitInlineCompiledModel(TfLiteContext* context,
                     const TfLiteDelegateParams* params) {
     // Convert model to neutron format
-    auto modelPre = PrepareModel(context, params);
-    flatbuffers::FlatBufferBuilder fbb;
-    flatbuffers::Offset<tflite::Model> root = tflite::Model::Pack(fbb, modelPre.get());
-    tflite::FinishModelBuffer(fbb, root);
-    uint32_t size = fbb.GetSize();
-    uint8_t *data = fbb.GetBufferPointer();
-    std::vector<uint8_t> buff(data, data + size);
-
-    auto  cvt_out = converter::convertModel(buff, options.target);
-    model = std::unique_ptr<ModelT>(tflite::GetModel(cvt_out.data())->UnPack());
-
+    model = ConvertModel(context, params);
     TF_LITE_ENSURE_EQ(context, model->subgraphs.size(), 1);
 
     // Map the neutron tensor index to tflite tensor index.
@@ -348,8 +336,7 @@ class NeutronDelegate : public SimpleDelegateInterface {
       ret = (registration->builtin_code == kTfLiteBuiltinCustom &&
              strcmp(registration->custom_name, NEUTRON_CUSTOM_NAME) == 0);
     } else {
-      ret = IsNodeSupportedByNeutron(context, node,
-                                     registration->builtin_code);
+      ret = DryrunNode(context, node, registration);
     }
     return ret;
   }
@@ -402,7 +389,7 @@ class NeutronDelegate : public SimpleDelegateInterface {
 
 NeutronDelegateOptions NeutronDelegateOptionsDefault() {
   NeutronDelegateOptions options;
-  options.target = "imx95";
+  options.target = NEUTRON_TARGET;
 
   return options;
 }

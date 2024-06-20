@@ -18,7 +18,9 @@
 
 #include "neutron_delegate_utils.h"
 #include "enum_mapping.h"
+#include "neutron/NeutronConverter.h"
 
+#include <fstream>
 #include <numeric>
 
 namespace tflite {
@@ -27,6 +29,30 @@ namespace neutron {
 typedef std::initializer_list<TfLiteType> TypeList;
 const TypeList supported_dtypes{kTfLiteUInt8, kTfLiteInt8};
 const TypeList supported_bias_dtypes{kTfLiteInt32};
+
+typedef std::set<int32_t> OpList;
+const OpList NEUTRON_OP{kTfLiteBuiltinAdd, kTfLiteBuiltinConv2d, kTfLiteBuiltinDepthwiseConv2d, kTfLiteBuiltinMaxPool2d,
+			kTfLiteBuiltinAveragePool2d, kTfLiteBuiltinFullyConnected, kTfLiteBuiltinPad, kTfLiteBuiltinReshape};
+
+void writeTFLiteModel(const tflite::ModelT *model, const std::string &filename) {
+  // Pack model into buffer.
+  flatbuffers::FlatBufferBuilder fbb;
+  flatbuffers::Offset<tflite::Model> root = tflite::Model::Pack(fbb, model);
+  tflite::FinishModelBuffer(fbb, root);
+  uint32_t size = fbb.GetSize();
+  uint8_t *buff = fbb.GetBufferPointer();
+
+  // Open file.
+  std::ofstream modelFile;
+  modelFile.open(filename, std::ios::binary);
+  if (!modelFile.is_open()) {
+    throw "Error opening model file!";
+  }
+
+  // Write model data.
+  modelFile.write((const char *)buff, size);
+  modelFile.close();
+}
 
 inline std::string CharPtrToStr(const char *in) {
   if (in == nullptr) {
@@ -193,32 +219,7 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
   }
 }
 
-std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
-                                     const TfLiteDelegateParams* params) {
-  ModelT *modelT = new ModelT;
-
-  // Copy model version.
-  modelT->version = 3;
-
-  // Copy model buffers.
-  // The model must always have the first buffer (sentinel) an empty buffer used for empty tensors/metadata.
-  modelT->buffers.emplace_back(new BufferT);
-
-  // Copy model graphs.
-  modelT->subgraphs.reserve(1);
-
-  // Create new graph.
-  modelT->subgraphs.emplace_back(new SubGraphT);
-  SubGraphT *graphNew = modelT->subgraphs.back().get();
-
-  // Copy graph tensors.
-  graphNew->tensors.reserve(context->tensors_size);
-  for (int i = 0; i < context->tensors_size; i ++) {
-    auto tensor = &context->tensors[i];
-    // Create new tensor.
-    graphNew->tensors.emplace_back(new TensorT);
-    TensorT *tensorNew = graphNew->tensors.back().get();
-
+void SetTensorT(ModelT *modelT, TfLiteTensor *tensor, TensorT *tensorNew) {
     // Copy tensor data.
     tensorNew->shape = TfLiteArrayToVector<int, TfLiteIntArray>(tensor->dims);
     tensorNew->type = TfLiteTypeToSchemaType(tensor->type);
@@ -247,6 +248,110 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
     assert(tensor->sparsity == nullptr);
     tensorNew->sparsity = std::unique_ptr<SparsityParametersT>(nullptr);
     tensorNew->shape_signature = TfLiteArrayToVector<int, TfLiteIntArray>(tensor->dims_signature);
+}
+
+std::unique_ptr<ModelT> PrepareNode(TfLiteContext* context,
+		                    const TfLiteNode* node,
+				    const TfLiteRegistration* registration) {
+  ModelT *modelT = new ModelT;
+
+  // Copy model version.
+  modelT->version = 3;
+
+  // Copy model buffers.
+  // The model must always have the first buffer (sentinel) an empty buffer used for empty tensors/metadata.
+  modelT->buffers.emplace_back(new BufferT);
+
+  // Copy model graphs.
+  modelT->subgraphs.reserve(1);
+
+  // Create new graph.
+  modelT->subgraphs.emplace_back(new SubGraphT);
+  SubGraphT *graphNew = modelT->subgraphs.back().get();
+
+  // Copy graph tensors.
+  graphNew->tensors.reserve(node->inputs->size + node->outputs->size);
+  // -- Copy graph inputs.
+  graphNew->inputs.reserve(node->inputs->size);
+  for (int i = 0; i < node->inputs->size; i ++) {
+    auto tensor = &context->tensors[node->inputs->data[i]];
+    // Create new tensor.
+    graphNew->tensors.emplace_back(new TensorT);
+    TensorT *tensorNew = graphNew->tensors.back().get();
+
+    SetTensorT(modelT, tensor, tensorNew);
+    if (tensor->allocation_type != kTfLiteMmapRo) {
+      graphNew->inputs.push_back(i);
+    }
+  }
+  // -- Copy graph outputs.
+  graphNew->outputs.reserve(node->outputs->size);
+  for (int i = 0; i < node->outputs->size; i ++) {
+    auto tensor = &context->tensors[node->outputs->data[i]];
+    // Create new tensor.
+    graphNew->tensors.emplace_back(new TensorT);
+    TensorT *tensorNew = graphNew->tensors.back().get();
+
+    SetTensorT(modelT, tensor, tensorNew);
+    graphNew->outputs.push_back(node->inputs->size + i);
+  }
+
+  // Copy model operator code.
+  // -- Create new operator code.
+  modelT->operator_codes.emplace_back(new OperatorCodeT);
+  modelT->operator_codes.back()->builtin_code = (BuiltinOperator)registration->builtin_code;
+  modelT->operator_codes.back()->custom_code = "";
+  modelT->operator_codes.back()->version = registration->version;
+  // -- Create new operator.
+  graphNew->operators.emplace_back(new OperatorT);
+  OperatorT *opNew = graphNew->operators.back().get();
+  opNew->opcode_index = 0;
+  opNew->inputs.reserve(node->inputs->size);
+  for (int i = 0; i < node->inputs->size; i ++) {
+    opNew->inputs.push_back(i);
+  }
+  opNew->outputs.reserve(node->outputs->size);
+  for (int i = 0; i < node->outputs->size; i ++) {
+    opNew->outputs.push_back(node->inputs->size + i);
+  }
+  SetBuiltinOptions(opNew, registration->builtin_code, node->builtin_data);
+  assert(node->custom_initial_data == nullptr);
+  opNew->custom_options_format = CustomOptionsFormat_FLEXBUFFERS;
+  opNew->intermediates = TfLiteArrayToVector<int, TfLiteIntArray>(node->intermediates);
+  // Copy graph name.
+  graphNew->name = "neutron-delegate";
+  // Copy model description.
+  modelT->description = "neutron-delegate";
+
+  return std::move(std::unique_ptr<ModelT>(modelT));
+}
+
+std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
+                                     const TfLiteDelegateParams* params) {
+  ModelT *modelT = new ModelT;
+
+  // Copy model version.
+  modelT->version = 3;
+
+  // Copy model buffers.
+  // The model must always have the first buffer (sentinel) an empty buffer used for empty tensors/metadata.
+  modelT->buffers.emplace_back(new BufferT);
+
+  // Copy model graphs.
+  modelT->subgraphs.reserve(1);
+
+  // Create new graph.
+  modelT->subgraphs.emplace_back(new SubGraphT);
+  SubGraphT *graphNew = modelT->subgraphs.back().get();
+
+  // Copy graph tensors.
+  graphNew->tensors.reserve(context->tensors_size);
+  for (int i = 0; i < context->tensors_size; i ++) {
+    auto tensor = &context->tensors[i];
+    // Create new tensor.
+    graphNew->tensors.emplace_back(new TensorT);
+    TensorT *tensorNew = graphNew->tensors.back().get();
+    SetTensorT(modelT, tensor, tensorNew);
   }
 
   // Copy graph inputs.
@@ -685,6 +790,52 @@ bool IsNodeSupportedByNeutron(TfLiteContext* context,
   }
 
   return supported;
+}
+
+bool DryrunNode(TfLiteContext* context,
+                const TfLiteNode* node,
+                const TfLiteRegistration* registration) {
+    if (NEUTRON_OP.count(registration->builtin_code) == 0)
+	return false;
+
+    // Convert model to neutron format
+    auto modelPre = PrepareNode(context, node, registration);
+    flatbuffers::FlatBufferBuilder fbb;
+    flatbuffers::Offset<tflite::Model> root = tflite::Model::Pack(fbb, modelPre.get());
+    tflite::FinishModelBuffer(fbb, root);
+    uint32_t size = fbb.GetSize();
+    uint8_t *data = fbb.GetBufferPointer();
+    std::vector<uint8_t> buff(data, data + size);
+
+    auto  cvt_out = converter::convertModel(buff, NEUTRON_TARGET);
+    auto model = std::unique_ptr<ModelT>(tflite::GetModel(cvt_out.data())->UnPack());
+    auto &ops = model->subgraphs[0]->operators;
+    for (int idx = 0; idx < ops.size(); idx ++) {
+      auto &op_code = model->operator_codes[ops[idx]->opcode_index];
+      if (op_code->builtin_code == BuiltinOperator_CUSTOM
+          && op_code->custom_code == NEUTRON_CUSTOM_NAME) {
+        return true;
+      }
+    }
+
+    return false;
+}
+
+std::unique_ptr<ModelT> ConvertModel(TfLiteContext* context,
+				     const TfLiteDelegateParams* params) {
+    // Convert model to neutron format
+    auto modelPre = PrepareModel(context, params);
+    flatbuffers::FlatBufferBuilder fbb;
+    flatbuffers::Offset<tflite::Model> root = tflite::Model::Pack(fbb, modelPre.get());
+    tflite::FinishModelBuffer(fbb, root);
+    uint32_t size = fbb.GetSize();
+    uint8_t *data = fbb.GetBufferPointer();
+    std::vector<uint8_t> buff(data, data + size);
+
+    auto cvt_out = converter::convertModel(buff, NEUTRON_TARGET);
+    auto model = std::unique_ptr<ModelT>(tflite::GetModel(cvt_out.data())->UnPack());
+
+    return std::move(model);
 }
 
 }  // namespace neutron

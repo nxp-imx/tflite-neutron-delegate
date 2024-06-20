@@ -21,10 +21,13 @@
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
+#define NEUTRON_TARGET "imx95"
+#define NEUTRON_CUSTOM_NAME "NeutronGraph"
+
 namespace tflite {
 namespace neutron {
 
-std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
+std::unique_ptr<ModelT> ConvertModel(TfLiteContext* context,
                                      const TfLiteDelegateParams* params);
 
 TfLiteStatus ComputeSlice(TfLiteTensor* input,
@@ -49,6 +52,10 @@ void* GetNeutronInputData(ModelT *model,
 bool IsNodeSupportedByNeutron(TfLiteContext* context,
                               const TfLiteNode* node,
                               int32_t builtin_code);
+
+bool DryrunNode(TfLiteContext* context,
+                const TfLiteNode* node,
+                const TfLiteRegistration* registration);
 
 }  // namespace neutron
 }  // namespace tflite

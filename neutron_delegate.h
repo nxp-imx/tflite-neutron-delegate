@@ -24,8 +24,6 @@
 
 #include "tensorflow/lite/c/common.h"
 
-#define NEUTRON_CUSTOM_NAME "NeutronGraph"
-
 typedef struct {
   std::string target;
   bool is_neutron_model;
