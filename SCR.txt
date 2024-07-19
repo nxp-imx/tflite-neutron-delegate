@@ -5,7 +5,7 @@ Outgoing License:            Apache-2.0
 License File:                LICENSE.txt
 Type of Content:             source
 Description and comments:    TensorFlow Lite Delegate for imx neutron NPU.
-Release Location:            https://github.com/nxp-imx/tflite-neutron-delegate
+Release Location:            https://github.com/nxp-imx/tflite-neutron-delegate -b lf-6.6.23_2.0.0-android
 Origin:                      NXP (Apache-2.0)
 
 --------------------------------------------
@@ -25,6 +25,7 @@ Origin:                    NXP (proprietary)
 --------------------------------------------
 
 Package:                   TensorFlow
+Version:                   2.15.0
 Outgoing License:          Apache 2.0
 License Files:             https://github.com/tensorflow/tensorflow/blob/master/LICENSE
 Type of content:           Source Code
