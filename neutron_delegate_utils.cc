@@ -16,12 +16,14 @@
  * limitations under the License.
  */
 
+#include "tensorflow/lite/core/subgraph.h"
 #include "neutron_delegate_utils.h"
 #include "enum_mapping.h"
 #include "neutron/NeutronConverter.h"
 
 #include <fstream>
 #include <numeric>
+#include <iostream>
 
 namespace tflite {
 namespace neutron {
@@ -150,6 +152,14 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_SUB: {
+      auto params = reinterpret_cast<TfLiteSubParams*>(data);
+      auto option = SubOptionsT();
+      option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
+      option.pot_scale_int16 = params->pot_scale_int16;
+      op->builtin_options.Set(option);
+      break;
+    }
     case BuiltinOperator_CONV_2D: {
       auto params = reinterpret_cast<TfLiteConvParams*>(data);
       auto option = Conv2DOptionsT();
@@ -172,6 +182,89 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
       option.dilation_w_factor = params->dilation_width_factor;
       option.dilation_h_factor = params->dilation_height_factor;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_TRANSPOSE_CONV: {
+      auto params = reinterpret_cast<TfLiteTransposeConvParams*>(data);
+      auto option = TransposeConvOptionsT();
+      option.padding = TfLitePaddingToSchemaPadding(params->padding);
+      option.stride_w = params->stride_width;
+      option.stride_h = params->stride_height;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_PACK: {
+      auto params = reinterpret_cast<TfLitePackParams*>(data);
+      auto option = PackOptionsT();
+      option.values_count = params->values_count;
+      option.axis = params->axis;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SPLIT_V: {
+      auto params = reinterpret_cast<TfLiteSplitVParams*>(data);
+      auto option = SplitVOptionsT();
+      option.num_splits = params->num_splits;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SHAPE: {
+      auto params = reinterpret_cast<TfLiteShapeParams*>(data);
+      auto option = ShapeOptionsT();
+      option.out_type = TfLiteTypeToSchemaType(params->out_type);
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SQUEEZE: {
+      auto params = reinterpret_cast<TfLiteSqueezeParams*>(data);
+      auto option = SqueezeOptionsT();
+      for (int i = 0; i < params->num_squeeze_dims; i ++) {
+          option.squeeze_dims.push_back(params->squeeze_dims[i]);
+      }
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_EXPAND_DIMS: {
+      auto option = ExpandDimsOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_TRANSPOSE: {
+      auto option = TransposeOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_EXP: {
+      auto option = ExpOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_STRIDED_SLICE: {
+      auto params = reinterpret_cast<TfLiteStridedSliceParams*>(data);
+      auto option = StridedSliceOptionsT();
+      option.begin_mask = params->begin_mask;
+      option.end_mask = params->end_mask;
+      option.ellipsis_mask = params->ellipsis_mask;
+      option.new_axis_mask = params->new_axis_mask;
+      option.shrink_axis_mask = params->shrink_axis_mask;
+      option.offset = params->offset;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_RESIZE_BILINEAR: {
+      auto params = reinterpret_cast<TfLiteResizeBilinearParams*>(data);
+      auto option = ResizeBilinearOptionsT();
+      option.align_corners = params->align_corners;
+      option.half_pixel_centers = params->half_pixel_centers;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_RESIZE_NEAREST_NEIGHBOR: {
+      auto params = reinterpret_cast<TfLiteResizeNearestNeighborParams*>(data);
+      auto option = ResizeNearestNeighborOptionsT();
+      option.align_corners = params->align_corners;
+      option.half_pixel_centers = params->half_pixel_centers;
       op->builtin_options.Set(option);
       break;
     }
@@ -203,6 +296,51 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_LEAKY_RELU: {
+      auto params = reinterpret_cast<TfLiteLeakyReluParams*>(data);
+      auto option = LeakyReluOptionsT();
+      option.alpha = params->alpha;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SPLIT: {
+      auto params = reinterpret_cast<TfLiteSplitParams*>(data);
+      auto option = SplitOptionsT();
+      option.num_splits = params->num_splits;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SOFTMAX: {
+      auto params = reinterpret_cast<TfLiteSoftmaxParams*>(data);
+      auto option = SoftmaxOptionsT();
+      option.beta = params->beta;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_QUANTIZE: {
+      auto option = QuantizeOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_MAXIMUM:
+    case BuiltinOperator_MINIMUM: {
+      auto option = MaximumMinimumOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_HARD_SWISH: {
+      auto option = HardSwishOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_UNPACK: {
+      auto params = reinterpret_cast<TfLiteUnpackParams*>(data);
+      auto option = UnpackOptionsT();
+      option.num = params->num;
+      option.axis = params->axis;
+      op->builtin_options.Set(option);
+      break;
+    }
     case BuiltinOperator_RESHAPE: {
       auto params = reinterpret_cast<TfLiteReshapeParams*>(data);
       auto option = ReshapeOptionsT();
@@ -212,9 +350,84 @@ void SetBuiltinOptions(OperatorT *op, int32_t op_code, void* data){
       op->builtin_options.Set(option);
       break;
     }
+    case BuiltinOperator_MEAN: {
+      auto params = reinterpret_cast<TfLiteReducerParams*>(data);
+      auto option = ReducerOptionsT();
+      option.keep_dims = params->keep_dims;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SPACE_TO_BATCH_ND: {
+      auto option = SpaceToBatchNDOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_BATCH_TO_SPACE_ND: {
+      auto option = BatchToSpaceNDOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_GELU: {
+      auto params = reinterpret_cast<TfLiteGeluParams*>(data);
+      auto option = GeluOptionsT();
+      option.approximate = params->approximate;
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_SQUARED_DIFFERENCE: {
+      auto option = SquaredDifferenceOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_DEQUANTIZE:
+    case BuiltinOperator_LOGISTIC:
+    case BuiltinOperator_LOG:
+    case BuiltinOperator_RSQRT:
+    case BuiltinOperator_RELU:
+    case BuiltinOperator_PRELU:
+    case BuiltinOperator_TANH:
+    case BuiltinOperator_RELU_N1_TO_1:
+    case BuiltinOperator_RELU6: {
+      break;
+    }
+    case BuiltinOperator_SLICE: {
+      auto option = SliceOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_ABS: {
+      auto option = AbsOptionsT();
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_CONCATENATION: {
+      auto params = reinterpret_cast<TfLiteConcatenationParams*>(data);
+      auto option = ConcatenationOptionsT();
+      option.axis = params->axis;
+      option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_MUL: {
+      auto params = reinterpret_cast<TfLiteMulParams*>(data);
+      auto option = MulOptionsT();
+      option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
+      op->builtin_options.Set(option);
+      break;
+    }
+    case BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM: {
+      auto params = reinterpret_cast<TfLiteUnidirectionalSequenceLSTMParams*>(data);
+      auto option = UnidirectionalSequenceLSTMOptionsT();
+      option.fused_activation_function = TfLiteActivationToSchemaActivation(params->activation);
+      option.cell_clip = params->cell_clip;
+      option.proj_clip = params->proj_clip;
+      option.time_major = params->time_major;
+      option.asymmetric_quantize_inputs = params->asymmetric_quantize_inputs;
+      op->builtin_options.Set(option);
+      break;
+    }
     default: {
-       printf("Can't support this op_code:%d!\n", op_code);
-       exit(0);
+       throw "Can't support Operator.";
     }
   }
 }
@@ -328,6 +541,21 @@ std::unique_ptr<ModelT> PrepareNode(TfLiteContext* context,
 
 std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
                                      const TfLiteDelegateParams* params) {
+  TfLiteIntArray* inputs;
+  TfLiteIntArray* outputs;
+  TfLiteIntArray* nodes_index;
+
+  if (params != nullptr) {
+    inputs = params->input_tensors;
+    outputs = params->output_tensors;
+    nodes_index = params->nodes_to_replace;
+  } else {
+    Subgraph* this_subgraph = reinterpret_cast<Subgraph*>(context->impl_);
+    context->GetExecutionPlan(context, &nodes_index);
+    inputs = ConvertVectorToTfLiteIntArray(this_subgraph->inputs());
+    outputs = ConvertVectorToTfLiteIntArray(this_subgraph->outputs());
+  }
+
   ModelT *modelT = new ModelT;
 
   // Copy model version.
@@ -355,7 +583,6 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
   }
 
   // Copy graph inputs.
-  auto inputs = params->input_tensors;
   graphNew->inputs.reserve(inputs->size);
   for (int i = 0; i < inputs->size; i ++) {
     if (context->tensors[inputs->data[i]].allocation_type != kTfLiteMmapRo) {
@@ -364,7 +591,6 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
   }
 
   // Copy graph outputs.
-  auto outputs = params->output_tensors;
   graphNew->outputs.reserve(outputs->size);
   for (int i = 0; i < outputs->size; i ++) {
     graphNew->outputs.push_back(outputs->data[i]);
@@ -393,7 +619,6 @@ std::unique_ptr<ModelT> PrepareModel(TfLiteContext* context,
   };
 
   // Copy graph operators.
-  auto nodes_index = params->nodes_to_replace;
   graphNew->operators.reserve(nodes_index->size);
   for (int i = 0; i < nodes_index->size; i ++) {
     TfLiteNode* node;
@@ -816,6 +1041,49 @@ bool DryrunNode(TfLiteContext* context,
           && op_code->custom_code == NEUTRON_CUSTOM_NAME) {
         return true;
       }
+    }
+
+    return false;
+}
+
+
+bool FindNodeInModel(TfLiteContext* context,
+                     const ModelT* model,
+                     const TfLiteNode* node,
+                     const TfLiteRegistration* registration) {
+    auto &metadata = model->metadata;
+    auto &buffers = model->buffers;
+
+    TfLiteIntArray* plan;
+    TfLiteNode* find;
+    TfLiteRegistration* no_use;
+    TF_LITE_ENSURE_STATUS(context->GetExecutionPlan(context, &plan));
+
+    // Get a list of supported nodes.
+    int node_index = -1;
+    for (int i : tflite::TfLiteIntArrayView(plan)) {
+        TF_LITE_ENSURE_STATUS(context->GetNodeAndRegistration(
+                              context, i, &find, &no_use));
+        if (node == find) {
+            node_index = i;
+            break;
+        }
+    }
+
+    for (auto &md : metadata) {
+        auto data = (int*)buffers[md->buffer]->data.data();
+	auto buf_size = buffers[md->buffer]->data.size();
+
+        std::size_t pos = md->name.find("sourceIndex");
+        if (pos == std::string::npos)
+            continue;
+
+	for (int i =0; i < buf_size / sizeof(int32_t); i ++) {
+	    int32_t idx = ((int32_t*)data)[i];
+            if (idx == node_index) {
+	      return true;
+	    }
+        }
     }
 
     return false;
