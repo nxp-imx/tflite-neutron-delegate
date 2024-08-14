@@ -57,6 +57,11 @@ bool DryrunNode(TfLiteContext* context,
                 const TfLiteNode* node,
                 const TfLiteRegistration* registration);
 
+bool FindNodeInModel(TfLiteContext* context,
+		     const ModelT* model,
+		     const TfLiteNode* node,
+		     const TfLiteRegistration* registration);
+
 }  // namespace neutron
 }  // namespace tflite
 

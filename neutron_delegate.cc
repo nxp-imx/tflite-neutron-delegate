@@ -336,7 +336,7 @@ class NeutronDelegate : public SimpleDelegateInterface {
       ret = (registration->builtin_code == kTfLiteBuiltinCustom &&
              strcmp(registration->custom_name, NEUTRON_CUSTOM_NAME) == 0);
     } else {
-      ret = DryrunNode(context, node, registration);
+      ret = !(FindNodeInModel(context, neutron_model.get(), node, registration));
     }
     return ret;
   }
@@ -362,7 +362,8 @@ class NeutronDelegate : public SimpleDelegateInterface {
     }
 
     options_.is_neutron_model = false;
-    return kTfLiteOk; 
+    neutron_model = ConvertModel(context, nullptr);
+    return kTfLiteOk;
   }
 
   const char* Name() const override {
@@ -382,6 +383,7 @@ class NeutronDelegate : public SimpleDelegateInterface {
 
  private:
   NeutronDelegateOptions options_;
+  std::unique_ptr<ModelT> neutron_model;
 };
 
 }  // namespace neutron
