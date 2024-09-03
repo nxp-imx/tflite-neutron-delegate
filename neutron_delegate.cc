@@ -178,8 +178,8 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 	delegate_op.params.pad.left_padding_count = 4;
 	delegate_op.params.pad.right_padding_count = 4;
         for (int i = 3; i >= 0; --i) {
-          delegate_op.params.pad.left_padding[idx] = pad_data[i * 2];
-          delegate_op.params.pad.right_padding[idx] = pad_data[i * 2 + 1];
+          delegate_op.params.pad.left_padding[i] = pad_data[i * 2];
+          delegate_op.params.pad.right_padding[i] = pad_data[i * 2 + 1];
         }
       } else if (op_code->builtin_code == BuiltinOperator_RESHAPE ||
 		 op_code->builtin_code == BuiltinOperator_QUANTIZE) {
