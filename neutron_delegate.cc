@@ -264,6 +264,20 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
           // Prepare data for through neutron driver.
           auto neutronRC = neutronModelPrepare(&op.mcfg, &op.nmh);
           TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+	} else if (options.model_type == NeutronModelType_FFIRMWARE) {
+
+          TfLiteTensor* firmware_tensor = NULL;
+          for (int i = 0; i < context->tensors_size; i ++){
+              auto tensor = &context->tensors[i];
+              if (strcmp(tensor->name, "NeutronFirmware") == 0) {
+                  firmware_tensor = tensor;
+              }
+          }
+          TF_LITE_ENSURE(context, strcmp(firmware_tensor->name, "NeutronFirmware") == 0);
+          auto neutronRC = neutronCustomPrepare((int32_t*)op.inputs_size.data(), op.inputs.size(),
+                                                (int32_t*)op.outputs_size.data(), op.outputs.size(),
+                                                firmware_tensor->data.data, firmware_tensor->bytes, &op.nmh);
+          TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	}
       }
     }
@@ -295,10 +309,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
             auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
             TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	  } else {
-            auto neutronRC = neutronCustomExec(delegate_op.dcfg.inputs, (int32_t*)delegate_op.inputs_size.data(),
-			                       delegate_op.inputs.size(),
-			                       delegate_op.dcfg.outputs, (int32_t*)delegate_op.outputs_size.data(),
-					       delegate_op.outputs.size());
+            auto neutronRC = neutronCustomExec(delegate_op.nmh, &delegate_op.dcfg);
             TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	  }
           break;
@@ -329,10 +340,8 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
   ~NeutronDelegateKernel() {
     for (auto& op : operations) {
       if (op.builtin_code == BuiltinOperator_CUSTOM) {
-        if (options.model_type == NeutronModelType_CONVERTOR) {
-          // Unprepare to free resources in neutron driver
-          neutronModelUnprepare(op.nmh);
-	}
+        // Unprepare to free resources in neutron driver
+        neutronModelUnprepare(op.nmh);
         // Delete arrays for inputs and outputs
         delete[] op.dcfg.inputs;
         delete[] op.dcfg.outputs;
@@ -392,7 +401,6 @@ class NeutronDelegate : public SimpleDelegateInterface {
 
   TfLiteStatus Initialize(TfLiteContext* context) override {
     // Initialize the neutron driver library
-    PrepareNeutronFirmware(context);
     NeutronError err = neutronInit();
     TF_LITE_ENSURE_EQ(context, err, ENONE);
 
