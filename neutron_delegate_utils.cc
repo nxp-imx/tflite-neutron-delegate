@@ -24,6 +24,9 @@
 #include <fstream>
 #include <numeric>
 #include <iostream>
+#include <cstdlib>
+#include <unistd.h>
+#include <fcntl.h>
 
 namespace tflite {
 namespace neutron {
@@ -1104,6 +1107,24 @@ std::unique_ptr<ModelT> ConvertModel(TfLiteContext* context,
     auto model = std::unique_ptr<ModelT>(tflite::GetModel(cvt_out.data())->UnPack());
 
     return std::move(model);
+}
+
+void PrepareNeutronFirmware(TfLiteContext* context) {
+    TfLiteTensor* firmware_tensor = NULL;
+    for (int i = 0; i < context->tensors_size; i ++){
+        auto tensor = &context->tensors[i];
+	if (strcmp(tensor->name, "NeutronFirmware") == 0) {
+	    firmware_tensor = tensor;
+	}
+    }
+
+    if (firmware_tensor == NULL) {
+        system("cp /lib/firmware/NeutronFirmwareDefault.elf /lib/firmware/NeutronFirmware.elf");
+    } else {
+	int fd = open("/lib/firmware/NeutronFirmware.elf", O_WRONLY | O_CREAT, 0644);
+	write(fd, firmware_tensor->data.data, firmware_tensor->bytes);
+	close(fd);
+    }
 }
 
 }  // namespace neutron

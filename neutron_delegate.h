@@ -24,9 +24,15 @@
 
 #include "tensorflow/lite/c/common.h"
 
+enum NeutronModelType{
+  NeutronModelType_NORMAL = 0,
+  NeutronModelType_CONVERTOR,
+  NeutronModelType_FFIRMWARE
+};
+
 typedef struct {
   std::string target;
-  bool is_neutron_model;
+  NeutronModelType model_type;
 }NeutronDelegateOptions;
 
 // Returns a structure with the default delegate options.

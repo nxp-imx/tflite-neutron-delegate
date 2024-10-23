@@ -49,11 +49,43 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
 
   TfLiteStatus Init(TfLiteContext* context,
                     const TfLiteDelegateParams* params) override {
-    if (options.is_neutron_model) {
+    if (options.model_type == NeutronModelType_CONVERTOR) {
       return InitOfflineCompiledModel(context, params);
-    } else {
+    } else if (options.model_type == NeutronModelType_NORMAL){
       return InitInlineCompiledModel(context, params);
+    } else {
+      return InitFineTuningModel(context, params);
     }
+  }
+
+  TfLiteStatus InitFineTuningModel(TfLiteContext* context,
+                    const TfLiteDelegateParams* params) {
+    TF_LITE_ENSURE_EQ(context, params->nodes_to_replace->size, 1);
+    operations.resize(1);
+
+    auto &delegate_op = operations[0];
+    // Get this node information.
+    const int node_index = params->nodes_to_replace->data[0];
+    TfLiteNode* node = nullptr;
+    TfLiteRegistration* node_registration = nullptr;
+    TF_LITE_ENSURE_EQ(
+        context,
+        context->GetNodeAndRegistration(context, node_index, &node,
+                                        &node_registration),
+        kTfLiteOk);
+    for (int index = 0; index < node->inputs->size - 1; index ++) {
+      auto tensor = &context->tensors[node->inputs->data[index]];
+      delegate_op.inputs.push_back(node->inputs->data[index]);
+      delegate_op.inputs_size.push_back(tensor->bytes);
+    }
+    for (int index = 0; index < node->outputs->size; index ++) {
+      auto tensor = &context->tensors[node->outputs->data[index]];
+      delegate_op.outputs.push_back(node->outputs->data[index]);
+      delegate_op.outputs_size.push_back(tensor->bytes);
+    }
+    delegate_op.builtin_code = BuiltinOperator_CUSTOM;
+
+    return kTfLiteOk;
   }
 
   TfLiteStatus InitOfflineCompiledModel(TfLiteContext* context,
@@ -228,9 +260,11 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
         op.dcfg.inputs = new const void*[op.inputs.size()];
         op.dcfg.outputs = new void*[op.outputs.size()];
 
-        // Prepare data for through neutron driver.
-        auto neutronRC = neutronModelPrepare(&op.mcfg, &op.nmh);
-        TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+	if (options.model_type == NeutronModelType_CONVERTOR) {
+          // Prepare data for through neutron driver.
+          auto neutronRC = neutronModelPrepare(&op.mcfg, &op.nmh);
+          TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+	}
       }
     }
     return kTfLiteOk;
@@ -256,9 +290,17 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
             delegate_op.dcfg.outputs[index] = tensor->data.raw;
           }
 
-          // Run neutron compute.
-          auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
-          TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+          if (options.model_type == NeutronModelType_CONVERTOR) {
+            // Run neutron compute.
+            auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
+            TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+	  } else {
+            auto neutronRC = neutronCustomExec(delegate_op.dcfg.inputs, (int32_t*)delegate_op.inputs_size.data(),
+			                       delegate_op.inputs.size(),
+			                       delegate_op.dcfg.outputs, (int32_t*)delegate_op.outputs_size.data(),
+					       delegate_op.outputs.size());
+            TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+	  }
           break;
         }
         case BuiltinOperator_SLICE: {
@@ -287,8 +329,10 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
   ~NeutronDelegateKernel() {
     for (auto& op : operations) {
       if (op.builtin_code == BuiltinOperator_CUSTOM) {
-        // Unprepare to free resources in neutron driver
-        neutronModelUnprepare(op.nmh);
+        if (options.model_type == NeutronModelType_CONVERTOR) {
+          // Unprepare to free resources in neutron driver
+          neutronModelUnprepare(op.nmh);
+	}
         // Delete arrays for inputs and outputs
         delete[] op.dcfg.inputs;
         delete[] op.dcfg.outputs;
@@ -300,6 +344,8 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
   struct OperationDataType {
     vector<int> inputs;
     vector<int> outputs;
+    vector<int> inputs_size;
+    vector<int> outputs_size;
 
     // Aggregate neutron model and data structures into one
     NeutronModelConfig mcfg;
@@ -332,9 +378,12 @@ class NeutronDelegate : public SimpleDelegateInterface {
                                  const TfLiteNode* node,
                                  TfLiteContext* context) const override {
     bool ret;
-    if (options_.is_neutron_model) {
+    if (options_.model_type == NeutronModelType_CONVERTOR) {
       ret = (registration->builtin_code == kTfLiteBuiltinCustom &&
              strcmp(registration->custom_name, NEUTRON_CUSTOM_NAME) == 0);
+    } else if (options_.model_type == NeutronModelType_FFIRMWARE){
+      ret = (registration->builtin_code == kTfLiteBuiltinCustom &&
+             strcmp(registration->custom_name, NEUTRON_FIRMWARE_NODE) == 0);
     } else {
       ret = !(FindNodeInModel(context, neutron_model.get(), node, registration));
     }
@@ -343,6 +392,7 @@ class NeutronDelegate : public SimpleDelegateInterface {
 
   TfLiteStatus Initialize(TfLiteContext* context) override {
     // Initialize the neutron driver library
+    PrepareNeutronFirmware(context);
     NeutronError err = neutronInit();
     TF_LITE_ENSURE_EQ(context, err, ENONE);
 
@@ -356,12 +406,17 @@ class NeutronDelegate : public SimpleDelegateInterface {
           context, node_index, &node, &registration));
       if (registration->builtin_code == kTfLiteBuiltinCustom &&
           strcmp(registration->custom_name, NEUTRON_CUSTOM_NAME) == 0) {
-        options_.is_neutron_model = true;
+        options_.model_type = NeutronModelType_CONVERTOR;
 	return kTfLiteOk;
+      }
+      if (registration->builtin_code == kTfLiteBuiltinCustom &&
+          strcmp(registration->custom_name, NEUTRON_FIRMWARE_NODE) == 0) {
+        options_.model_type = NeutronModelType_FFIRMWARE;
+        return kTfLiteOk;
       }
     }
 
-    options_.is_neutron_model = false;
+    options_.model_type = NeutronModelType_NORMAL;
     neutron_model = ConvertModel(context, nullptr);
     return kTfLiteOk;
   }

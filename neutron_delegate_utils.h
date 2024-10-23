@@ -23,6 +23,7 @@
 
 #define NEUTRON_TARGET "imx95"
 #define NEUTRON_CUSTOM_NAME "NeutronGraph"
+#define NEUTRON_FIRMWARE_NODE "NeutronOp"
 
 namespace tflite {
 namespace neutron {
@@ -62,6 +63,7 @@ bool FindNodeInModel(TfLiteContext* context,
 		     const TfLiteNode* node,
 		     const TfLiteRegistration* registration);
 
+void PrepareNeutronFirmware(TfLiteContext* context);
 }  // namespace neutron
 }  // namespace tflite
 
