@@ -219,7 +219,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
         input_size = 1;
         output_size = 1;
       } else {
-        TF_LITE_KERNEL_LOG(context, "Failed to build Neutron graph.\n");
+        TF_LITE_KERNEL_LOG(context, "Failed to build Neutron graph opcode: %d.\n", op_code->builtin_code);
         return kTfLiteDelegateError;
       }
       delegate_op.builtin_code = op_code->builtin_code;
@@ -260,7 +260,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
         op.dcfg.inputs = new const void*[op.inputs.size()];
         op.dcfg.outputs = new void*[op.outputs.size()];
 
-	if (options.model_type == NeutronModelType_CONVERTOR) {
+	if (options.model_type !=NeutronModelType_FFIRMWARE) {
           // Prepare data for through neutron driver.
           auto neutronRC = neutronModelPrepare(&op.mcfg, &op.nmh);
           TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
@@ -304,7 +304,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
             delegate_op.dcfg.outputs[index] = tensor->data.raw;
           }
 
-          if (options.model_type == NeutronModelType_CONVERTOR) {
+          if (options.model_type !=NeutronModelType_FFIRMWARE) {
             // Run neutron compute.
             auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
             TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
