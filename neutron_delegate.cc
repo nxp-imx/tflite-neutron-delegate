@@ -31,6 +31,7 @@
 #include "tensorflow/lite/util.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
 #include "tensorflow/lite/delegates/utils/simple_delegate.h"
+#include "tensorflow/lite/core/subgraph.h"
 
 extern "C" {
 #include "neutron/NeutronDriver.h"
@@ -84,6 +85,10 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
       delegate_op.outputs_size.push_back(tensor->bytes);
     }
     delegate_op.builtin_code = BuiltinOperator_CUSTOM;
+
+    char *s = getenv("NEUTRON_ENABLE_ZERO_COPY");
+    if (s)
+        enableZerocp = true;
 
     return kTfLiteOk;
   }
@@ -265,6 +270,8 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
           auto neutronRC = neutronModelPrepare(&op.mcfg, &op.nmh);
           TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	} else if (options.model_type == NeutronModelType_FFIRMWARE) {
+          Subgraph* this_subgraph = reinterpret_cast<Subgraph*>(context->impl_);
+          size_t input_size, output_size;
 
           TfLiteTensor* firmware_tensor = NULL;
           for (int i = 0; i < context->tensors_size; i ++){
@@ -278,6 +285,30 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
                                                 (int32_t*)op.outputs_size.data(), op.outputs.size(),
                                                 firmware_tensor->data.data, firmware_tensor->bytes, &op.nmh);
           TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+          if (enableZerocp) {
+              // Setup input and output tensor ptr to use neutron memory.
+              neutronRC = neutronDataSetup(op.nmh, &op.dcfg);
+              TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
+
+              input_size = op.inputs.size();
+              output_size = op.outputs.size();
+
+              // alloc for input
+              for (int index = 0; index < input_size; index ++) {
+                  auto tensor_index = op.inputs[index];
+                  auto tensor = &context->tensors[tensor_index];
+                  TfLiteCustomAllocation allocation= {(void*)op.dcfg.inputs[index], tensor->bytes};
+                  this_subgraph->SetCustomAllocationForTensor(tensor_index, allocation, kTfLiteCustomAllocationFlagsSkipAlignCheck);
+              }
+
+              // alloc for output
+              for (int index = 0; index < output_size; index ++) {
+                  auto tensor_index = op.outputs[index];
+                  auto tensor = &context->tensors[tensor_index];
+                  TfLiteCustomAllocation allocation= {(void*)op.dcfg.outputs[index], tensor->bytes};
+                  this_subgraph->SetCustomAllocationForTensor(tensor_index, allocation, kTfLiteCustomAllocationFlagsSkipAlignCheck);
+              }
+          }
 	}
       }
     }
@@ -291,6 +322,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
       auto output = &context->tensors[delegate_op.outputs[0]];
       switch (delegate_op.builtin_code) {
         case BuiltinOperator_CUSTOM: {
+#if 0
           // Set reference for all inputs
           for (int index = 0; index < delegate_op.inputs.size(); index ++) {
             auto tensor_index = delegate_op.inputs[index];
@@ -304,11 +336,38 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
             delegate_op.dcfg.outputs[index] = tensor->data.raw;
           }
 
+#endif
           if (options.model_type !=NeutronModelType_FFIRMWARE) {
+            // Set reference for all inputs
+            for (int index = 0; index < delegate_op.inputs.size(); index ++) {
+              auto tensor_index = delegate_op.inputs[index];
+              auto tensor = &context->tensors[tensor_index];
+              delegate_op.dcfg.inputs[index] = tensor->data.raw;
+            }
+
+            for (int index = 0; index < delegate_op.outputs.size(); index ++) {
+              auto tensor_index = delegate_op.outputs[index];
+              auto tensor = &context->tensors[tensor_index];
+              delegate_op.dcfg.outputs[index] = tensor->data.raw;
+            }
             // Run neutron compute.
             auto neutronRC = neutronRunBlocking(delegate_op.nmh, &delegate_op.dcfg);
             TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	  } else {
+            if (!enableZerocp) {
+              // Set reference for all inputs
+              for (int index = 0; index < delegate_op.inputs.size(); index ++) {
+                auto tensor_index = delegate_op.inputs[index];
+                auto tensor = &context->tensors[tensor_index];
+                delegate_op.dcfg.inputs[index] = tensor->data.raw;
+              }
+
+              for (int index = 0; index < delegate_op.outputs.size(); index ++) {
+                auto tensor_index = delegate_op.outputs[index];
+                auto tensor = &context->tensors[tensor_index];
+                delegate_op.dcfg.outputs[index] = tensor->data.raw;
+              }
+            }
             auto neutronRC = neutronCustomExec(delegate_op.nmh, &delegate_op.dcfg);
             TF_LITE_ENSURE_EQ(context, neutronRC, ENONE);
 	  }
@@ -371,6 +430,7 @@ class NeutronDelegateKernel : public SimpleDelegateKernelInterface {
   std::unique_ptr<ModelT> model;
 
   int slice_input;
+  bool enableZerocp = false;
 
   vector<OperationDataType> operations;
   NeutronDelegateOptions options;
